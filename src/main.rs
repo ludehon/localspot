@@ -82,6 +82,48 @@ async fn main() -> Result<()> {
 
 
 
+    
+
+    // --------------------------- OLD CODE ---------------------------------
+
+    // get the audio decryption key for the track
+    // let key = core
+    // .block_on(session.audio_key().request(track.id, *file_id))
+    // .expect("Cannot get audio key");
+
+
+    // open encrypted file
+    // let mut encrypted_file = core
+    //     .block_on(AudioFile::open(&session, *file_id, 320, true))
+    //     .unwrap();
+
+
+    // let mut buffer = Vec::new();
+    // let mut read_all: Result<usize> = Ok(0);
+    // let fetched = AtomicBool::new(false);
+    // threadpool.scoped(|scope| {
+    // scope.execute(|| {
+    //     // Read the entire encrypted file into the buffer.
+    //     read_all = encrypted_file.read_to_end(&mut buffer);
+    //     // Set fetched to true to indicate that the file has been read.
+    //     fetched.store(true, Ordering::Release);
+    // });
+    // // Wait until the file has been fully fetched. We poll the atomic
+    // // flag and yield to the async runtime briefly to avoid busy-waiting.
+    // while !fetched.load(Ordering::Acquire) {
+    //     // Sleep for 100 milliseconds before checking again.
+    //     core.block_on(async { tokio::time::sleep(Duration::from_millis(100)).await });
+    //     // core.turn(Some(Duration::from_millis(100)));
+    // }
+    // });
+    // read_all.expect("Cannot read file stream");
+    // let mut decrypted_buffer = Vec::new();
+    // AudioDecrypt::new(key, &buffer[..])
+    //     .read_to_end(&mut decrypted_buffer)
+    //     .expect("Cannot decrypt stream");
+    // let fname = format!("{} - {}.ogg", artists_strs.join(", "), track.name);
+    // std::fs::write(&fname, &decrypted_buffer[0xa7..]).expect("Cannot write decrypted track");
+    // info!("Filename: {}", fname);
 
 
 
@@ -95,7 +137,7 @@ async fn main() -> Result<()> {
 
 
 
-
+    // ------------------------------------------------------------
 
     // Request the audio decryption key for that track/file
     // let key = core
