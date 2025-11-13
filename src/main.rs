@@ -1,14 +1,8 @@
 use std::env;
-
 use anyhow::{Context, Result, anyhow};
 use librespot::{
-    core::{SpotifyUri, authentication::Credentials, config::SessionConfig, session::Session},
-    playback::{
-        audio_backend,
-        config::{AudioFormat, PlayerConfig},
-        mixer::NoOpVolume,
-        player::Player,
-    },
+    core::{SpotifyId, SpotifyUri, authentication::Credentials, config::SessionConfig, session::Session},
+    metadata::{Metadata, Track},
 };
 use librespot_oauth::OAuthClientBuilder;
 
@@ -31,13 +25,20 @@ async fn main() -> Result<()> {
             "Provide a Spotify track URI as the first CLI argument or set SPOTIFY_TRACK_URI",
         )?;
 
-    let spotify_uri = SpotifyUri::from_uri(&track_uri)
-        .with_context(|| format!("Failed to parse Spotify URI '{track_uri}'"))?;
-    if !spotify_uri.is_playable() {
-        return Err(anyhow!(
-            "URI '{track_uri}' is not a playable track or episode"
-        ));
-    }
+    // Extract track ID from URI string
+    let track_id_str = track_uri
+        .strip_prefix("spotify:track:")
+        .or_else(|| track_uri.splitn(2, ":track:").nth(1))
+        .ok_or_else(|| anyhow!("Invalid track URI format: '{track_uri}'"))?;
+
+    // Create SpotifyId from the track ID
+    let track_id = SpotifyId::from_base62(track_id_str)
+        .with_context(|| format!("Failed to parse Spotify track ID '{track_id_str}'"))?;
+
+    // Create SpotifyUri from the SpotifyId
+    let spotify_uri = SpotifyUri::Track { id: track_id };
+    
+    println!("track_uri: {}, track_id: {}, spotify_uri: {}", track_uri, track_id, spotify_uri);
 
     println!("Starting OAuth flow. Your browser may open automatically.");
     let oauth_client = OAuthClientBuilder::new(&client_id, &redirect_uri, vec!["streaming"])
@@ -61,20 +62,60 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to connect to Spotify")?;
 
-    let backend = audio_backend::find(None).ok_or_else(|| {
-        anyhow!("No audio backend found. Enable an audio backend feature in librespot.")
-    })?;
-    let audio_format = AudioFormat::default();
-    let player_config = PlayerConfig::default();
+    println!("Fetching metadata for URI: {}", spotify_uri);
 
-    let player = Player::new(player_config, session, Box::new(NoOpVolume), move || {
-        backend(None, audio_format)
-    });
+    let track = Track::get(&session, &spotify_uri)
+        .await
+        .with_context(|| format!("Failed to fetch metadata for '{track_uri}'"))?;
+    println!(
+        "Loaded track metadata: '{}' by {}",
+        track.name,
+        track
+            .artists
+            .iter()
+            .map(|artist| artist.name.clone())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
 
-    println!("Playing '{track_uri}'...");
-    player.load(spotify_uri, true, 0);
-    player.await_end_of_track().await;
-    println!("Playback finished.");
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    // Request the audio decryption key for that track/file
+    // let key = core
+    //     .block_on(session.audio_key().request(track.id, *file_id))
+    //     .expect("Cannot get audio key");
+
+    // let backend = audio_backend::find(None).ok_or_else(|| {
+    //     anyhow!("No audio backend found. Enable an audio backend feature in librespot.")
+    // })?;
+    // let audio_format = AudioFormat::default();
+    // let player_config = PlayerConfig::default();
+
+    // let player = Player::new(player_config, session, Box::new(NoOpVolume), move || {
+    //     backend(None, audio_format)
+    // });
+
+    // println!("Playing '{track_uri}'...");
+    // player.load(spotify_uri, true, 0);
+    // player.await_end_of_track().await;
+    // println!("Playback finished.");
 
     Ok(())
 }
