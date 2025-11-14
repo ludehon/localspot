@@ -12,7 +12,7 @@ use librespot::{
 };
 use librespot_oauth::OAuthClientBuilder;
 use std::env;
-use std::io::Read;
+use std::io::{self, BufRead, Read};
 
 
 const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:8898/login";
@@ -173,23 +173,35 @@ async fn main() -> Result<()> {
         .context("SPOTIFY_CLIENT_ID must be set in the environment")?;
     let _client_secret = env::var("SPOTIFY_CLIENT_SECRET")
         .context("SPOTIFY_CLIENT_SECRET must be set in the environment")?;
-
-    let redirect_uri =
-        env::var("SPOTIFY_REDIRECT_URI").unwrap_or_else(|_| DEFAULT_REDIRECT_URI.to_string());
+    let redirect_uri = env::var("SPOTIFY_REDIRECT_URI").unwrap_or_else(|_| DEFAULT_REDIRECT_URI.to_string());
 
     // Create OAuth session
     let session = create_oauth_session(&client_id, &redirect_uri).await?;
     
-    // Get track URI
-    let track_uri = env::args()
-        .nth(1)
-        .or_else(|| env::var("SPOTIFY_TRACK_URI").ok())
-        .context(
-            "Provide a Spotify track URI as the first CLI argument or set SPOTIFY_TRACK_URI",
-        )?;
-
-    // Download the track
-    download_track(&session, track_uri).await?;
+    // Read track URIs from stdin, one per line
+    println!("Reading track URIs from stdin...");
+    let stdin = io::stdin();
+    let reader = stdin.lock();
+    
+    for (line_number, line_result) in reader.lines().enumerate() {
+        let track_uri = line_result.context("Failed to read line from stdin")?;
+        let track_uri = track_uri.trim();
+        
+        // Skip empty lines
+        if track_uri.is_empty() {
+            continue;
+        }
+        
+        println!("\n--- Processing track {} ({}) ---", line_number + 1, track_uri);
+        
+        // Download the track, but continue on error
+        if let Err(e) = download_track(&session, track_uri.to_string()).await {
+            eprintln!("Error downloading {}: {:?}", track_uri, e);
+            eprintln!("Continuing with next track...");
+        }
+    }
+    
+    println!("\n--- Finished processing all tracks ---");
 
     Ok(())
 }
