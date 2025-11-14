@@ -13,7 +13,9 @@ use librespot::{
 use librespot_oauth::OAuthClientBuilder;
 use regex::Regex;
 use std::env;
-use std::io::{self, BufRead, Read};
+use std::fs::File;
+use std::io::{BufRead, BufReader, Read};
+use std::path::{Path, PathBuf};
 
 
 const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:8898/login";
@@ -82,7 +84,8 @@ fn stream_data_rate(format: AudioFileFormat) -> usize {
 /// # Parameters
 /// - `session`: Spotify session
 /// - `track_uri`: The Spotify track URI
-async fn download_track(session: &Session, track_uri: String) -> Result<()> {
+/// - `output_dir`: Directory where the track will be saved
+async fn download_track(session: &Session, track_uri: String, output_dir: &Path) -> Result<()> {
     // Spotify URI processing
     let spotify_uri = SpotifyUri::from_uri(&track_uri)
         .with_context(|| format!("'{track_uri}' is not a valid Spotify URI"))?;
@@ -160,10 +163,11 @@ async fn download_track(session: &Session, track_uri: String) -> Result<()> {
     decrypted_file.read_to_end(&mut buffer).context("Failed to read decrypted audio data")?;
     // println!("Read {} bytes of decrypted audio", buffer.len());
 
-    // Write the buffer into a ogg file
+    // Write the buffer into a ogg file in the output directory
     let filename = format!("{} - {}.ogg", artists_strs.join(", "), track.name);
-    std::fs::write(&filename, &buffer[0xa7..]).expect("Cannot write decrypted track");
-    // println!("Saved to: {}", filename);
+    let output_path = output_dir.join(&filename);
+    std::fs::write(&output_path, &buffer[0xa7..]).expect("Cannot write decrypted track");
+    // println!("Saved to: {}", output_path.display());
 
     Ok(())
 }
@@ -176,13 +180,34 @@ async fn main() -> Result<()> {
         .context("SPOTIFY_CLIENT_SECRET must be set in the environment")?;
     let redirect_uri = env::var("SPOTIFY_REDIRECT_URI").unwrap_or_else(|_| DEFAULT_REDIRECT_URI.to_string());
 
+    // Get CSV filename from command line arguments
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        anyhow::bail!("Usage: {} <playlist_csv_file>", args[0]);
+    }
+    let csv_filename = &args[1];
+    
+    // Extract the base name without extension for the output directory
+    let csv_path = Path::new(csv_filename);
+    let dir_name = csv_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .context("Invalid CSV filename")?;
+    
+    // Create output directory
+    let output_dir = PathBuf::from(dir_name);
+    std::fs::create_dir_all(&output_dir)
+        .with_context(|| format!("Failed to create output directory: {}", output_dir.display()))?;
+    println!("Output directory: {}", output_dir.display());
+
     // Create OAuth session
     let session = create_oauth_session(&client_id, &redirect_uri).await?;
     
-    // Read track URIs from stdin, one per line
-    println!("Reading track URIs from stdin...");
-    let stdin = io::stdin();
-    let reader = stdin.lock();
+    // Open and read track URIs from CSV file, one per line
+    println!("Reading track URIs from {}...", csv_filename);
+    let file = File::open(csv_filename)
+        .with_context(|| format!("Failed to open CSV file: {}", csv_filename))?;
+    let reader = BufReader::new(file);
     
     // Create regex patterns to extract track IDs
     let spotify_uri = Regex::new(r"spotify:track:([[:alnum:]]+)").unwrap();
@@ -222,7 +247,7 @@ async fn main() -> Result<()> {
         println!("\n--- Processing track {} ({}) ---", line_number + 1, track_uri);
         
         // Download the track, but continue on error
-        if let Err(e) = download_track(&session, track_uri.clone()).await {
+        if let Err(e) = download_track(&session, track_uri.clone(), &output_dir).await {
             eprintln!("Error downloading {}: {:?}", track_uri, e);
             eprintln!("Continuing with next track...");
         }
