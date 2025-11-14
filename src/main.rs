@@ -14,6 +14,31 @@ use std::io::Read;
 
 const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:8898/login";
 
+async fn create_oauth_session(client_id: &str, redirect_uri: &str) -> Result<Session> {
+    println!("Starting OAuth flow. Your browser may open automatically.");
+    let oauth_client = OAuthClientBuilder::new(client_id, redirect_uri, vec!["streaming"])
+        .open_in_browser()
+        .build()
+        .context("Failed to construct Spotify OAuth client")?;
+    
+    let token = oauth_client
+        .get_access_token()
+        .context("Failed to complete Spotify OAuth flow")?;
+    
+    println!("OAuth flow completed. Scopes granted: {:?}", token.scopes);
+    
+    let credentials = Credentials::with_access_token(token.access_token);
+    let session_config = SessionConfig::default();
+    let session = Session::new(session_config, None);
+    
+    session
+        .connect(credentials, false)
+        .await
+        .context("Failed to connect to Spotify")?;
+    
+    Ok(session)
+}
+
 fn stream_data_rate(format: AudioFileFormat) -> usize {
     let kbps = match format {
         AudioFileFormat::OGG_VORBIS_96 => 12.,
@@ -50,32 +75,16 @@ async fn main() -> Result<()> {
     let redirect_uri =
         env::var("SPOTIFY_REDIRECT_URI").unwrap_or_else(|_| DEFAULT_REDIRECT_URI.to_string());
 
+    // Create OAuth session
+    let session = create_oauth_session(&client_id, &redirect_uri).await?;
+    
+    // Get track URI
     let track_uri = env::args()
         .nth(1)
         .or_else(|| env::var("SPOTIFY_TRACK_URI").ok())
         .context(
             "Provide a Spotify track URI as the first CLI argument or set SPOTIFY_TRACK_URI",
         )?;
-
-    // OAuth flow
-    println!("Starting OAuth flow. Your browser may open automatically.");
-    let oauth_client = OAuthClientBuilder::new(&client_id, &redirect_uri, vec!["streaming"])
-        .open_in_browser()
-        .build()
-        .context("Failed to construct Spotify OAuth client")?;
-    let token = oauth_client
-        .get_access_token()
-        .context("Failed to complete Spotify OAuth flow")?;
-    println!("OAuth flow completed. Scopes granted: {:?}", token.scopes);
-    let credentials = Credentials::with_access_token(token.access_token);
-    let session_config = SessionConfig::default();
-    let session = Session::new(session_config, None);
-
-    // Connect to Spotify
-    session
-        .connect(credentials, false)
-        .await
-        .context("Failed to connect to Spotify")?;
 
     // Spotify URI processing
     let spotify_uri = SpotifyUri::from_uri(&track_uri)
