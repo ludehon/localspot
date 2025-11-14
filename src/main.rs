@@ -1,12 +1,42 @@
-use std::env;
 use anyhow::{Context, Result};
 use librespot::{
-    core::{SpotifyUri, authentication::Credentials, config::SessionConfig, session::Session},
+    audio::AudioFile,
+    core::{
+        SpotifyUri, authentication::Credentials, config::SessionConfig, session::Session,
+        spotify_id::SpotifyId,
+    },
     metadata::audio::{AudioFileFormat, AudioItem},
 };
 use librespot_oauth::OAuthClientBuilder;
+use std::env;
 
 const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:8898/login";
+
+fn stream_data_rate(format: AudioFileFormat) -> usize {
+    let kbps = match format {
+        AudioFileFormat::OGG_VORBIS_96 => 12.,
+        AudioFileFormat::OGG_VORBIS_160 => 20.,
+        AudioFileFormat::OGG_VORBIS_320 => 40.,
+        AudioFileFormat::MP3_256 => 32.,
+        AudioFileFormat::MP3_320 => 40.,
+        AudioFileFormat::MP3_160 => 20.,
+        AudioFileFormat::MP3_96 => 12.,
+        AudioFileFormat::MP3_160_ENC => 20.,
+        AudioFileFormat::AAC_24 => 3.,
+        AudioFileFormat::AAC_48 => 6.,
+        AudioFileFormat::AAC_160 => 20.,
+        AudioFileFormat::AAC_320 => 40.,
+        AudioFileFormat::MP4_128 => 16.,
+        AudioFileFormat::OTHER5 => 40.,
+        AudioFileFormat::FLAC_FLAC => 112., // assume 900 kbit/s on average
+        AudioFileFormat::XHE_AAC_12 => 1.5,
+        AudioFileFormat::XHE_AAC_16 => 2.,
+        AudioFileFormat::XHE_AAC_24 => 3.,
+        AudioFileFormat::FLAC_FLAC_24BIT => 3.,
+    };
+    let data_rate: f32 = kbps * 1024.;
+    data_rate.ceil() as usize
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -51,17 +81,31 @@ async fn main() -> Result<()> {
 
     // Fetch audio item
     println!("Fetching audio item for {track_uri} ...");
-    let audio_item = AudioItem::get_file(&session, spotify_uri)
+    let audio_item = AudioItem::get_file(&session, spotify_uri.clone())
         .await
         .with_context(|| format!("Failed to fetch audio metadata for '{track_uri}'"))?;
-    println!("Resolved audio item: {} {}", audio_item.name, audio_item.uri);
+    println!(
+        "Resolved audio item: {} {}",
+        audio_item.name, audio_item.uri
+    );
     println!("Duration: {} ms", audio_item.duration_ms);
     println!("Available audio files:");
     for (format, file_id) in audio_item.files.iter() {
         println!("  {:?} -> {}", format, file_id);
     }
 
-    // Find the best available format
+    // get file_id for OGG_VORBIS_320
+    let file_id = match audio_item.files.get(&AudioFileFormat::OGG_VORBIS_320) {
+        Some(file_id) => file_id,
+        None => {
+            return Err(anyhow::anyhow!(
+                "OGG_VORBIS_320 format not available for '{}'",
+                audio_item.name
+            ));
+        }
+    };
+
+    // get bytes_per_second for OGG_VORBIS_320
     let bytes_per_second = stream_data_rate(AudioFileFormat::OGG_VORBIS_320);
     println!(
         "Approximate data rate for {:?}: {} bytes/s",
@@ -69,33 +113,24 @@ async fn main() -> Result<()> {
         bytes_per_second
     );
 
+    // Open the encrypted file
+    let encrypted_file = AudioFile::open(&session, *file_id, bytes_per_second)
+        .await
+        .context("Unable to load encrypted file")?;
+    let is_cached = encrypted_file.is_cached();
+    println!("Encrypted file cached: {is_cached}");
+    let _stream_loader_controller = encrypted_file
+        .get_stream_loader_controller()
+        .context("Stream loader controller unavailable")?;
+
+    // Get key for file_id
+    let track_id = SpotifyId::try_from(&spotify_uri).context("Spotify URI must reference a track ID")?;
+    let audio_key = session
+        .audio_key()
+        .request(track_id, *file_id)
+        .await
+        .context("Failed to request audio key")?;
+    println!("Audio key: {:?}", audio_key);
 
     Ok(())
-}
-
-
-fn stream_data_rate(format: AudioFileFormat) -> usize {
-    let kbps = match format {
-        AudioFileFormat::OGG_VORBIS_96 => 12.,
-        AudioFileFormat::OGG_VORBIS_160 => 20.,
-        AudioFileFormat::OGG_VORBIS_320 => 40.,
-        AudioFileFormat::MP3_256 => 32.,
-        AudioFileFormat::MP3_320 => 40.,
-        AudioFileFormat::MP3_160 => 20.,
-        AudioFileFormat::MP3_96 => 12.,
-        AudioFileFormat::MP3_160_ENC => 20.,
-        AudioFileFormat::AAC_24 => 3.,
-        AudioFileFormat::AAC_48 => 6.,
-        AudioFileFormat::AAC_160 => 20.,
-        AudioFileFormat::AAC_320 => 40.,
-        AudioFileFormat::MP4_128 => 16.,
-        AudioFileFormat::OTHER5 => 40.,
-        AudioFileFormat::FLAC_FLAC => 112., // assume 900 kbit/s on average
-        AudioFileFormat::XHE_AAC_12 => 1.5,
-        AudioFileFormat::XHE_AAC_16 => 2.,
-        AudioFileFormat::XHE_AAC_24 => 3.,
-        AudioFileFormat::FLAC_FLAC_24BIT => 3.,
-    };
-    let data_rate: f32 = kbps * 1024.;
-    data_rate.ceil() as usize
 }
