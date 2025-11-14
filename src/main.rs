@@ -102,6 +102,21 @@ async fn download_track(session: &Session, track_uri: String, output_dir: &Path)
     let artists_strs: Vec<String> = track.artists.iter().map(|a| a.name.clone()).collect();
     println!("Track {} by {}", track.name, artists_strs.join(", "));
     
+    // Check if file already exists
+    let filename = format!("{} - {}.ogg", artists_strs.join(", "), track.name)
+        .replace('/', "-")  // Replace forward slashes
+        .replace('\\', "-") // Replace backslashes (for Windows compatibility)
+        .replace(':', "-")  // Replace colons (invalid on Windows)
+        .replace('?', "")   // Remove question marks
+        .replace('*', "")   // Remove asterisks
+        .replace('"', "'"); // Replace quotes
+    let output_path = output_dir.join(&filename);
+    
+    if output_path.exists() {
+        println!("File already exists, skipping download: {}", output_path.display());
+        return Ok(());
+    }
+    
     // Fetch audio item
     // println!("Fetching audio item for {track_uri} ...");
     let audio_item = AudioItem::get_file(&session, spotify_uri.clone())
@@ -164,14 +179,6 @@ async fn download_track(session: &Session, track_uri: String, output_dir: &Path)
     // println!("Read {} bytes of decrypted audio", buffer.len());
 
     // Write the buffer into a ogg file in the output directory
-    let filename = format!("{} - {}.ogg", artists_strs.join(", "), track.name)
-        .replace('/', "-")  // Replace forward slashes
-        .replace('\\', "-") // Replace backslashes (for Windows compatibility)
-        .replace(':', "-")  // Replace colons (invalid on Windows)
-        .replace('?', "")   // Remove question marks
-        .replace('*', "")   // Remove asterisks
-        .replace('"', "'"); // Replace quotes
-    let output_path = output_dir.join(&filename);
     std::fs::write(&output_path, &buffer[0xa7..]).expect("Cannot write decrypted track");
     // println!("Saved to: {}", output_path.display());
 
