@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use librespot::{
-    audio::AudioFile,
+    audio::{AudioDecrypt, AudioFile},
     core::{
         SpotifyUri, authentication::Credentials, config::SessionConfig, session::Session,
         spotify_id::SpotifyId,
@@ -9,6 +9,8 @@ use librespot::{
 };
 use librespot_oauth::OAuthClientBuilder;
 use std::env;
+use std::io::Read;
+
 
 const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:8898/login";
 
@@ -131,6 +133,15 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to request audio key")?;
     println!("Audio key: {:?}", audio_key);
+
+    // Decrypt file
+    let mut decrypted_file = AudioDecrypt::new(Some(audio_key), encrypted_file);
+    println!("Successfully created decrypted audio file");
+
+    // Read file
+    let mut buffer = Vec::new();
+    decrypted_file.read_to_end(&mut buffer).context("Failed to read decrypted audio data")?;
+    println!("Read {} bytes of decrypted audio", buffer.len());
 
     Ok(())
 }
