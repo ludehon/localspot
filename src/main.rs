@@ -1,8 +1,8 @@
 use std::env;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use librespot::{
     core::{SpotifyUri, authentication::Credentials, config::SessionConfig, session::Session},
-    metadata::audio::AudioItem,
+    metadata::audio::{AudioFileFormat, AudioItem},
 };
 use librespot_oauth::OAuthClientBuilder;
 
@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
         .context("Failed to complete Spotify OAuth flow")?;
     println!("OAuth flow completed. Scopes granted: {:?}", token.scopes);
     let credentials = Credentials::with_access_token(token.access_token);
-    let mut session_config = SessionConfig::default();
+    let session_config = SessionConfig::default();
     let session = Session::new(session_config, None);
 
     // Connect to Spotify
@@ -54,13 +54,48 @@ async fn main() -> Result<()> {
     let audio_item = AudioItem::get_file(&session, spotify_uri)
         .await
         .with_context(|| format!("Failed to fetch audio metadata for '{track_uri}'"))?;
-    println!("Resolved audio item: {}", audio_item.name);
+    println!("Resolved audio item: {} {}", audio_item.name, audio_item.uri);
     println!("Duration: {} ms", audio_item.duration_ms);
-    // println!("Available audio files:");
-    // for (format, file_id) in audio_item.files.iter() {
-    //     println!("  {:?} -> {}", format, file_id);
-    // }
+    println!("Available audio files:");
+    for (format, file_id) in audio_item.files.iter() {
+        println!("  {:?} -> {}", format, file_id);
+    }
+
+    // Find the best available format
+    let bytes_per_second = stream_data_rate(AudioFileFormat::OGG_VORBIS_320);
+    println!(
+        "Approximate data rate for {:?}: {} bytes/s",
+        AudioFileFormat::OGG_VORBIS_320,
+        bytes_per_second
+    );
 
 
     Ok(())
+}
+
+
+fn stream_data_rate(format: AudioFileFormat) -> usize {
+    let kbps = match format {
+        AudioFileFormat::OGG_VORBIS_96 => 12.,
+        AudioFileFormat::OGG_VORBIS_160 => 20.,
+        AudioFileFormat::OGG_VORBIS_320 => 40.,
+        AudioFileFormat::MP3_256 => 32.,
+        AudioFileFormat::MP3_320 => 40.,
+        AudioFileFormat::MP3_160 => 20.,
+        AudioFileFormat::MP3_96 => 12.,
+        AudioFileFormat::MP3_160_ENC => 20.,
+        AudioFileFormat::AAC_24 => 3.,
+        AudioFileFormat::AAC_48 => 6.,
+        AudioFileFormat::AAC_160 => 20.,
+        AudioFileFormat::AAC_320 => 40.,
+        AudioFileFormat::MP4_128 => 16.,
+        AudioFileFormat::OTHER5 => 40.,
+        AudioFileFormat::FLAC_FLAC => 112., // assume 900 kbit/s on average
+        AudioFileFormat::XHE_AAC_12 => 1.5,
+        AudioFileFormat::XHE_AAC_16 => 2.,
+        AudioFileFormat::XHE_AAC_24 => 3.,
+        AudioFileFormat::FLAC_FLAC_24BIT => 3.,
+    };
+    let data_rate: f32 = kbps * 1024.;
+    data_rate.ceil() as usize
 }
