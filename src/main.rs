@@ -17,6 +17,14 @@ use std::io::Read;
 
 const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:8898/login";
 
+/// Starts an OAuth flow with Spotify and returns an authenticated session.
+/// 
+/// # Arguments
+/// * `client_id` - The Spotify application's client ID.
+/// * `redirect_uri` - The redirect URI for OAuth authorization.
+/// 
+/// # Returns
+/// A Result containing the authenticated `Session` on success, or an error otherwise.
 async fn create_oauth_session(client_id: &str, redirect_uri: &str) -> Result<Session> {
     println!("Starting OAuth flow. Your browser may open automatically.");
     let oauth_client = OAuthClientBuilder::new(client_id, redirect_uri, vec!["streaming"])
@@ -68,27 +76,12 @@ fn stream_data_rate(format: AudioFileFormat) -> usize {
     data_rate.ceil() as usize
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let client_id = env::var("SPOTIFY_CLIENT_ID")
-        .context("SPOTIFY_CLIENT_ID must be set in the environment")?;
-    let _client_secret = env::var("SPOTIFY_CLIENT_SECRET")
-        .context("SPOTIFY_CLIENT_SECRET must be set in the environment")?;
-
-    let redirect_uri =
-        env::var("SPOTIFY_REDIRECT_URI").unwrap_or_else(|_| DEFAULT_REDIRECT_URI.to_string());
-
-    // Create OAuth session
-    let session = create_oauth_session(&client_id, &redirect_uri).await?;
-    
-    // Get track URI
-    let track_uri = env::args()
-        .nth(1)
-        .or_else(|| env::var("SPOTIFY_TRACK_URI").ok())
-        .context(
-            "Provide a Spotify track URI as the first CLI argument or set SPOTIFY_TRACK_URI",
-        )?;
-
+/// Downloads a Spotify track.
+/// 
+/// # Parameters
+/// - `session`: Spotify session
+/// - `track_uri`: The Spotify track URI
+async fn download_track(session: &Session, track_uri: String) -> Result<()> {
     // Spotify URI processing
     let spotify_uri = SpotifyUri::from_uri(&track_uri)
         .with_context(|| format!("'{track_uri}' is not a valid Spotify URI"))?;
@@ -170,6 +163,33 @@ async fn main() -> Result<()> {
     let filename = format!("{} - {}.ogg", artists_strs.join(", "), track.name);
     std::fs::write(&filename, &buffer[0xa7..]).expect("Cannot write decrypted track");
     println!("Saved to: {}", filename);
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let client_id = env::var("SPOTIFY_CLIENT_ID")
+        .context("SPOTIFY_CLIENT_ID must be set in the environment")?;
+    let _client_secret = env::var("SPOTIFY_CLIENT_SECRET")
+        .context("SPOTIFY_CLIENT_SECRET must be set in the environment")?;
+
+    let redirect_uri =
+        env::var("SPOTIFY_REDIRECT_URI").unwrap_or_else(|_| DEFAULT_REDIRECT_URI.to_string());
+
+    // Create OAuth session
+    let session = create_oauth_session(&client_id, &redirect_uri).await?;
+    
+    // Get track URI
+    let track_uri = env::args()
+        .nth(1)
+        .or_else(|| env::var("SPOTIFY_TRACK_URI").ok())
+        .context(
+            "Provide a Spotify track URI as the first CLI argument or set SPOTIFY_TRACK_URI",
+        )?;
+
+    // Download the track
+    download_track(&session, track_uri).await?;
 
     Ok(())
 }
