@@ -5,7 +5,10 @@ use librespot::{
         SpotifyUri, authentication::Credentials, config::SessionConfig, session::Session,
         spotify_id::SpotifyId,
     },
-    metadata::audio::{AudioFileFormat, AudioItem},
+    metadata::{
+        audio::{AudioFileFormat, AudioItem},
+        Track, Metadata,
+    },
 };
 use librespot_oauth::OAuthClientBuilder;
 use std::env;
@@ -90,6 +93,18 @@ async fn main() -> Result<()> {
     let spotify_uri = SpotifyUri::from_uri(&track_uri)
         .with_context(|| format!("'{track_uri}' is not a valid Spotify URI"))?;
 
+    // Fetch track metadata
+    println!("Fetching track metadata for {track_uri} ...");
+    let track = Track::get(&session, &spotify_uri)
+        .await
+        .context("Failed to fetch track metadata")?;
+    
+    let track_id = SpotifyId::try_from(&spotify_uri).context("Spotify URI must reference a track ID")?;
+    
+    // Get artist names
+    let artists_strs: Vec<String> = track.artists.iter().map(|a| a.name.clone()).collect();
+    println!("Track: {} by {}", track.name, artists_strs.join(", "));
+    
     // Fetch audio item
     println!("Fetching audio item for {track_uri} ...");
     let audio_item = AudioItem::get_file(&session, spotify_uri.clone())
@@ -135,7 +150,6 @@ async fn main() -> Result<()> {
         .context("Stream loader controller unavailable")?;
 
     // Get key for file_id
-    let track_id = SpotifyId::try_from(&spotify_uri).context("Spotify URI must reference a track ID")?;
     let audio_key = session
         .audio_key()
         .request(track_id, *file_id)
@@ -153,7 +167,9 @@ async fn main() -> Result<()> {
     println!("Read {} bytes of decrypted audio", buffer.len());
 
     // Write the buffer into a ogg file
-    std::fs::write(&"decrypted.ogg", &buffer[0xa7..]).expect("Cannot write decrypted track");
+    let filename = format!("{} - {}.ogg", artists_strs.join(", "), track.name);
+    std::fs::write(&filename, &buffer[0xa7..]).expect("Cannot write decrypted track");
+    println!("Saved to: {}", filename);
 
     Ok(())
 }
