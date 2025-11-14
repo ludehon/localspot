@@ -11,6 +11,7 @@ use librespot::{
     },
 };
 use librespot_oauth::OAuthClientBuilder;
+use regex::Regex;
 use std::env;
 use std::io::{self, BufRead, Read};
 
@@ -87,7 +88,7 @@ async fn download_track(session: &Session, track_uri: String) -> Result<()> {
         .with_context(|| format!("'{track_uri}' is not a valid Spotify URI"))?;
 
     // Fetch track metadata
-    println!("Fetching track metadata for {track_uri} ...");
+    // println!("Fetching track metadata for {track_uri} ...");
     let track = Track::get(&session, &spotify_uri)
         .await
         .context("Failed to fetch track metadata")?;
@@ -99,19 +100,19 @@ async fn download_track(session: &Session, track_uri: String) -> Result<()> {
     println!("Track: {} by {}", track.name, artists_strs.join(", "));
     
     // Fetch audio item
-    println!("Fetching audio item for {track_uri} ...");
+    // println!("Fetching audio item for {track_uri} ...");
     let audio_item = AudioItem::get_file(&session, spotify_uri.clone())
         .await
         .with_context(|| format!("Failed to fetch audio metadata for '{track_uri}'"))?;
-    println!(
-        "Resolved audio item: {} {}",
-        audio_item.name, audio_item.uri
-    );
-    println!("Duration: {} ms", audio_item.duration_ms);
-    println!("Available audio files:");
-    for (format, file_id) in audio_item.files.iter() {
-        println!("  {:?} -> {}", format, file_id);
-    }
+    // println!(
+    //     "Resolved audio item: {} {}",
+    //     audio_item.name, audio_item.uri
+    // );
+    // println!("Duration: {} ms", audio_item.duration_ms);
+    // println!("Available audio files:");
+    // for (format, file_id) in audio_item.files.iter() {
+    //     println!("  {:?} -> {}", format, file_id);
+    // }
 
     // get file_id for OGG_VORBIS_320
     let file_id = match audio_item.files.get(&AudioFileFormat::OGG_VORBIS_320) {
@@ -126,18 +127,18 @@ async fn download_track(session: &Session, track_uri: String) -> Result<()> {
 
     // get bytes_per_second for OGG_VORBIS_320
     let bytes_per_second = stream_data_rate(AudioFileFormat::OGG_VORBIS_320);
-    println!(
-        "Approximate data rate for {:?}: {} bytes/s",
-        AudioFileFormat::OGG_VORBIS_320,
-        bytes_per_second
-    );
+    // println!(
+    //     "Approximate data rate for {:?}: {} bytes/s",
+    //     AudioFileFormat::OGG_VORBIS_320,
+    //     bytes_per_second
+    // );
 
     // Open the encrypted file
     let encrypted_file = AudioFile::open(&session, *file_id, bytes_per_second)
         .await
         .context("Unable to load encrypted file")?;
     let is_cached = encrypted_file.is_cached();
-    println!("Encrypted file cached: {is_cached}");
+    // println!("Encrypted file cached: {is_cached}");
     let _stream_loader_controller = encrypted_file
         .get_stream_loader_controller()
         .context("Stream loader controller unavailable")?;
@@ -148,21 +149,21 @@ async fn download_track(session: &Session, track_uri: String) -> Result<()> {
         .request(track_id, *file_id)
         .await
         .context("Failed to request audio key")?;
-    println!("Audio key: {:?}", audio_key);
+    // println!("Audio key: {:?}", audio_key);
 
     // Decrypt file
     let mut decrypted_file = AudioDecrypt::new(Some(audio_key), encrypted_file);
-    println!("Successfully created decrypted audio file");
+    // println!("Successfully created decrypted audio file");
 
     // Read decrypted file into a buffer
     let mut buffer = Vec::new();
     decrypted_file.read_to_end(&mut buffer).context("Failed to read decrypted audio data")?;
-    println!("Read {} bytes of decrypted audio", buffer.len());
+    // println!("Read {} bytes of decrypted audio", buffer.len());
 
     // Write the buffer into a ogg file
     let filename = format!("{} - {}.ogg", artists_strs.join(", "), track.name);
     std::fs::write(&filename, &buffer[0xa7..]).expect("Cannot write decrypted track");
-    println!("Saved to: {}", filename);
+    // println!("Saved to: {}", filename);
 
     Ok(())
 }
@@ -183,19 +184,45 @@ async fn main() -> Result<()> {
     let stdin = io::stdin();
     let reader = stdin.lock();
     
+    // Create regex patterns to extract track IDs
+    let spotify_uri = Regex::new(r"spotify:track:([[:alnum:]]+)").unwrap();
+    let spotify_url = Regex::new(r"open\.spotify\.com/track/([[:alnum:]]+)").unwrap();
+    
     for (line_number, line_result) in reader.lines().enumerate() {
-        let track_uri = line_result.context("Failed to read line from stdin")?;
-        let track_uri = track_uri.trim();
+        let line = line_result.context("Failed to read line from stdin")?;
+        let line = line.trim();
         
         // Skip empty lines
-        if track_uri.is_empty() {
+        if line.is_empty() {
             continue;
         }
+        
+        // Extract track ID from the line using regex
+        let track_id = if let Some(captures) = spotify_uri.captures(line) {
+            captures.get(1).map(|m| m.as_str())
+        } else if let Some(captures) = spotify_url.captures(line) {
+            captures.get(1).map(|m| m.as_str())
+        } else {
+            None
+        };
+        
+        // If we couldn't extract a track ID, skip this line
+        let track_id = match track_id {
+            Some(id) => id,
+            None => {
+                eprintln!("Warning: Could not extract track ID from line {}: '{}'", line_number + 1, line);
+                eprintln!("Continuing with next line...");
+                continue;
+            }
+        };
+        
+        // Construct the proper Spotify URI
+        let track_uri = format!("spotify:track:{}", track_id);
         
         println!("\n--- Processing track {} ({}) ---", line_number + 1, track_uri);
         
         // Download the track, but continue on error
-        if let Err(e) = download_track(&session, track_uri.to_string()).await {
+        if let Err(e) = download_track(&session, track_uri.clone()).await {
             eprintln!("Error downloading {}: {:?}", track_uri, e);
             eprintln!("Continuing with next track...");
         }

@@ -1596,6 +1596,7 @@ dependencies = [
  "base64 0.21.7",
  "librespot",
  "librespot-oauth",
+ "regex",
  "reqwest 0.11.27",
  "serde",
  "tokio",
