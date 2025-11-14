@@ -113,7 +113,7 @@ async fn download_track(session: &Session, track_uri: String, output_dir: &Path)
     let output_path = output_dir.join(&filename);
     
     if output_path.exists() {
-        println!("File already exists, skipping download: {}", output_path.display());
+        println!("File already exists, skipping download: {}", filename);
         return Ok(());
     }
     
@@ -131,6 +131,18 @@ async fn download_track(session: &Session, track_uri: String, output_dir: &Path)
     // for (format, file_id) in audio_item.files.iter() {
     //     println!("  {:?} -> {}", format, file_id);
     // }
+    if audio_item.files.is_empty() {
+        eprintln!("Warning: No audio files available for '{}' ({})", 
+            audio_item.name, track_uri);
+        eprintln!("This track may be unavailable in your region or require Premium.");
+        return Ok(()); // Skip this track gracefully
+    }
+
+    // println!("Available audio files:");
+    // for (format, file_id) in audio_item.files.iter() {
+    //     println!("  {:?} -> {}", format, file_id);
+    // }
+
 
     // get file_id for OGG_VORBIS_320
     let file_id = match audio_item.files.get(&AudioFileFormat::OGG_VORBIS_320) {
@@ -145,11 +157,6 @@ async fn download_track(session: &Session, track_uri: String, output_dir: &Path)
 
     // get bytes_per_second for OGG_VORBIS_320
     let bytes_per_second = stream_data_rate(AudioFileFormat::OGG_VORBIS_320);
-    // println!(
-    //     "Approximate data rate for {:?}: {} bytes/s",
-    //     AudioFileFormat::OGG_VORBIS_320,
-    //     bytes_per_second
-    // );
 
     // Open the encrypted file
     let encrypted_file = AudioFile::open(&session, *file_id, bytes_per_second)
