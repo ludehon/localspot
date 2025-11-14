@@ -138,10 +138,13 @@ async fn main() -> Result<()> {
     let mut decrypted_file = AudioDecrypt::new(Some(audio_key), encrypted_file);
     println!("Successfully created decrypted audio file");
 
-    // Read file
+    // Read decrypted file into a buffer
     let mut buffer = Vec::new();
     decrypted_file.read_to_end(&mut buffer).context("Failed to read decrypted audio data")?;
     println!("Read {} bytes of decrypted audio", buffer.len());
+
+    // Write the buffer into a ogg file
+    std::fs::write(&"decrypted.ogg", &buffer[0xa7..]).expect("Cannot write decrypted track");
 
     Ok(())
 }
