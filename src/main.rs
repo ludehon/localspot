@@ -100,7 +100,7 @@ async fn download_track(session: &Session, track_uri: String, output_dir: &Path)
     
     // Get artist names
     let artists_strs: Vec<String> = track.artists.iter().map(|a| a.name.clone()).collect();
-    println!("Track: {} by {}", track.name, artists_strs.join(", "));
+    println!("Track {} by {}", track.name, artists_strs.join(", "));
     
     // Fetch audio item
     // println!("Fetching audio item for {track_uri} ...");
@@ -164,7 +164,13 @@ async fn download_track(session: &Session, track_uri: String, output_dir: &Path)
     // println!("Read {} bytes of decrypted audio", buffer.len());
 
     // Write the buffer into a ogg file in the output directory
-    let filename = format!("{} - {}.ogg", artists_strs.join(", "), track.name);
+    let filename = format!("{} - {}.ogg", artists_strs.join(", "), track.name)
+        .replace('/', "-")  // Replace forward slashes
+        .replace('\\', "-") // Replace backslashes (for Windows compatibility)
+        .replace(':', "-")  // Replace colons (invalid on Windows)
+        .replace('?', "")   // Remove question marks
+        .replace('*', "")   // Remove asterisks
+        .replace('"', "'"); // Replace quotes
     let output_path = output_dir.join(&filename);
     std::fs::write(&output_path, &buffer[0xa7..]).expect("Cannot write decrypted track");
     // println!("Saved to: {}", output_path.display());
@@ -213,8 +219,19 @@ async fn main() -> Result<()> {
     let spotify_uri = Regex::new(r"spotify:track:([[:alnum:]]+)").unwrap();
     let spotify_url = Regex::new(r"open\.spotify\.com/track/([[:alnum:]]+)").unwrap();
     
-    for (line_number, line_result) in reader.lines().enumerate() {
-        let line = line_result.context("Failed to read line from stdin")?;
+    // Read all lines into a vector to get the total count
+    let all_lines: Vec<(usize, String)> = reader
+        .lines()
+        .enumerate()
+        .filter_map(|(i, line_result)| {
+            line_result.ok().map(|line| (i, line))
+        })
+        .collect();
+    
+    let total_lines = all_lines.len();
+    println!("Found {} lines in CSV file", total_lines);
+    
+    for (line_number, line) in all_lines {
         let line = line.trim();
         
         // Skip empty lines
@@ -244,7 +261,7 @@ async fn main() -> Result<()> {
         // Construct the proper Spotify URI
         let track_uri = format!("spotify:track:{}", track_id);
         
-        println!("\n--- Processing track {} ({}) ---", line_number + 1, track_uri);
+        println!("\n--- Processing track {}/{} ({}) ---", line_number + 1, total_lines, track_uri);
         
         // Download the track, but continue on error
         if let Err(e) = download_track(&session, track_uri.clone(), &output_dir).await {
