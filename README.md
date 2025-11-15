@@ -10,6 +10,7 @@ localspot allows you to save your Spotify playlists into local files, for educat
 - Spotify developper app with a client id/secret and a redirect URI to http://127.0.0.1:8898/login
 - Rust 1.85.0 (2024 edition) or newer
 - Librespot v0.8.0
+
 *Developped with rustc 1.91.1 and librespot v0.8.0*
 ## Usage
 1. Export your playlist into a file (you can use  [Exportify](https://exportify.app/))
