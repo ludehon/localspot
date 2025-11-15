@@ -177,10 +177,11 @@ async fn download_track(session: &Session, track_uri: String, output_dir: &Path)
     
     // Get artist names
     let artists_strs: Vec<String> = track.artists.iter().map(|a| a.name.clone()).collect();
-    println!("Track {} by {}", track.name, artists_strs.join(", "));
+    let album_name = track.album.name.clone();
+    println!("Track {} by {} (Album: {})", track.name, artists_strs.join(", "), album_name);
     
     // Check if file already exists
-    let filename = format!("{} - {}.ogg", artists_strs.join(", "), track.name)
+    let filename = format!("{} - {} - {}.ogg", artists_strs.join(", "), album_name, track.name)
         .replace('/', "-")  // Replace forward slashes
         .replace('\\', "-") // Replace backslashes (for Windows compatibility)
         .replace(':', "-")  // Replace colons (invalid on Windows)
@@ -252,7 +253,7 @@ async fn download_track(session: &Session, track_uri: String, output_dir: &Path)
     // Write the buffer into a ogg file in the output directory
     std::fs::write(&output_path, &buffer[0xa7..]).expect("Cannot write decrypted track");
     // println!("Saved to: {}", output_path.display());
-
+    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
     Ok(())
 }
 
@@ -346,6 +347,7 @@ async fn main() -> Result<()> {
             eprintln!("Error downloading {}: {:?}", track_uri, e);
             eprintln!("Continuing with next track...");
         }
+        
     }
     
     println!("\n--- Finished processing all tracks ---");
