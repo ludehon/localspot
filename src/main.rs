@@ -79,6 +79,86 @@ fn stream_data_rate(format: AudioFileFormat) -> usize {
     data_rate.ceil() as usize
 }
 
+/// Resolves a track and its audio item, checking availability and trying alternatives if needed.
+/// 
+/// # Parameters
+/// - `session`: Spotify session
+/// - `track`: The original track metadata
+/// - `spotify_uri`: The Spotify URI of the track
+/// - `track_uri`: String representation of the track URI (for error messages)
+/// 
+/// # Returns
+/// A tuple of (Track, AudioItem, SpotifyId, SpotifyUri) with the resolved track,
+/// or None if no available version was found.
+async fn resolve_available_track(
+    session: &Session,
+    track: Track,
+    spotify_uri: &SpotifyUri,
+    track_uri: &str,
+) -> Result<Option<(Track, AudioItem, SpotifyId, SpotifyUri)>> {
+    let track_id = SpotifyId::try_from(spotify_uri)
+        .context("Spotify URI must reference a track ID")?;
+    let current_spotify_uri = spotify_uri.clone();
+    
+    // Fetch audio item
+    let audio_item = AudioItem::get_file(&session, current_spotify_uri.clone())
+        .await
+        .with_context(|| format!("Failed to fetch audio metadata for '{track_uri}'"))?;
+    
+    // Check if track is available, if not try alternatives
+    if audio_item.files.is_empty() {
+        eprintln!("Warning: No audio files available for '{}' ({})", 
+            audio_item.name, track_uri);
+        
+        // Try alternatives if available
+        let alternatives = track.alternatives.clone();
+        if !alternatives.is_empty() {
+            eprintln!("Checking {} alternative(s)...", alternatives.len());
+            
+            for (alt_idx, alternative) in alternatives.iter().enumerate() {
+                let alt_uri = format!("{}", alternative);
+                eprintln!("  Trying alternative {}/{}: {}", alt_idx + 1, alternatives.len(), alt_uri);
+                
+                // Try to fetch the alternative track
+                match Track::get(&session, alternative).await {
+                    Ok(alt_track) => {
+                        // Try to get audio item for alternative
+                        match AudioItem::get_file(&session, alternative.clone()).await {
+                            Ok(alt_audio_item) => {
+                                if !alt_audio_item.files.is_empty() {
+                                    println!("  ✓ Found available alternative: {}", alt_uri);
+                                    // Found a working alternative, return it
+                                    let alt_track_id = SpotifyId::try_from(alternative)
+                                        .context("Failed to convert alternative to SpotifyId")?;
+                                    return Ok(Some((alt_track, alt_audio_item, alt_track_id, alternative.clone())));
+                                } else {
+                                    eprintln!("  ✗ Alternative {} also unavailable", alt_uri);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("  ✗ Failed to fetch audio for alternative {}: {:?}", alt_uri, e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("  ✗ Failed to fetch alternative track {}: {:?}", alt_uri, e);
+                    }
+                }
+            }
+            
+            // After checking all alternatives, none were available
+            eprintln!("No available alternatives found. Skipping track.");
+            return Ok(None); // No available version found
+        } else {
+            eprintln!("No alternatives available. Skipping track.");
+            return Ok(None); // No available version found
+        }
+    }
+    
+    // Track is available
+    Ok(Some((track, audio_item, track_id, current_spotify_uri)))
+}
+
 /// Downloads a Spotify track.
 /// 
 /// # Parameters
@@ -91,12 +171,9 @@ async fn download_track(session: &Session, track_uri: String, output_dir: &Path)
         .with_context(|| format!("'{track_uri}' is not a valid Spotify URI"))?;
 
     // Fetch track metadata
-    // println!("Fetching track metadata for {track_uri} ...");
     let track = Track::get(&session, &spotify_uri)
         .await
         .context("Failed to fetch track metadata")?;
-    
-    let track_id = SpotifyId::try_from(&spotify_uri).context("Spotify URI must reference a track ID")?;
     
     // Get artist names
     let artists_strs: Vec<String> = track.artists.iter().map(|a| a.name.clone()).collect();
@@ -117,26 +194,13 @@ async fn download_track(session: &Session, track_uri: String, output_dir: &Path)
         return Ok(());
     }
     
-    // Fetch audio item
-    // println!("Fetching audio item for {track_uri} ...");
-    let audio_item = AudioItem::get_file(&session, spotify_uri.clone())
-        .await
-        .with_context(|| format!("Failed to fetch audio metadata for '{track_uri}'"))?;
-    // println!(
-    //     "Resolved audio item: {} {}",
-    //     audio_item.name, audio_item.uri
-    // );
-    // println!("Duration: {} ms", audio_item.duration_ms);
-    // println!("Available audio files:");
-    // for (format, file_id) in audio_item.files.iter() {
-    //     println!("  {:?} -> {}", format, file_id);
-    // }
-    if audio_item.files.is_empty() {
-        eprintln!("Warning: No audio files available for '{}' ({})", 
-            audio_item.name, track_uri);
-        eprintln!("This track may be unavailable in your region or require Premium.");
-        return Ok(()); // Skip this track gracefully
-    }
+    // Resolve available track (checking alternatives if needed)
+    let resolved = resolve_available_track(&session, track, &spotify_uri, &track_uri).await?;
+    let (_track, audio_item, track_id, _current_spotify_uri) = match resolved {
+        Some(data) => data,
+        None => return Ok(()), // Track unavailable, already logged
+    };
+    
 
     // println!("Available audio files:");
     // for (format, file_id) in audio_item.files.iter() {
@@ -162,8 +226,8 @@ async fn download_track(session: &Session, track_uri: String, output_dir: &Path)
     let encrypted_file = AudioFile::open(&session, *file_id, bytes_per_second)
         .await
         .context("Unable to load encrypted file")?;
-    let is_cached = encrypted_file.is_cached();
-    // println!("Encrypted file cached: {is_cached}");
+    let _is_cached = encrypted_file.is_cached();
+    // println!("Encrypted file cached: {_is_cached}");
     let _stream_loader_controller = encrypted_file
         .get_stream_loader_controller()
         .context("Stream loader controller unavailable")?;
