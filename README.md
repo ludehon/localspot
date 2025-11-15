@@ -8,7 +8,7 @@ localspot allows you to save your Spotify playlists into local files, for educat
 - Parse input file to retrieve Spotify track id
 ## Requirements
 - Spotify developper app with a client id/secret and a redirect URI to http://127.0.0.1:8898/login
-- Rust 2024 or newer
+- Rust 1.85.0 (2024 edition) or newer
 - Librespot v0.8.0
 *Developped with rustc 1.91.1 and librespot v0.8.0*
 ## Usage
