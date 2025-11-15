@@ -1,52 +1,23 @@
-WIP
 
-https://docs.rs/librespot-playback/latest/src/librespot_playback/player.rs.html
+# LocalSpot
+localspot allows you to save your Spotify playlists into local files, for education purpose only.
 
-let encrypted_file = AudioFile::open(&self.session, file_id, bytes_per_second);
+## Features
+- Saves a playlist into a folder containing ogg files
+- Skip existing saved songs
+- Parse input file to retrieve Spotify track id
+## Requirements
+- Spotify developper app with a client id/secret and a redirect URI to http://127.0.0.1:8898/login
+- Rust 2024 or newer
+- Librespot v0.8.0
+*Developped with rustc 1.91.1 and librespot v0.8.0*
+## Usage
+1. Export your playlist into a file (you can use  [Exportify](https://exportify.app/))
+2. Cargo build
+3. Export environment variables SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET
+4. Launch the script : ./localspot your_playlist_file.csv
 
-let encrypted_file = match encrypted_file.await {
-    Ok(encrypted_file) => encrypted_file,
-    Err(e) => {
-        error!("Unable to load encrypted file: {e:?}");
-        return None;
-    }
-};
-
-let is_cached = encrypted_file.is_cached();
-
-let stream_loader_controller = encrypted_file.get_stream_loader_controller().ok()?;
-
-// Not all audio files are encrypted. If we can't get a key, try loading the track
-// without decryption. If the file was encrypted after all, the decoder will fail
-// parsing and bail out, so we should be safe from outputting ear-piercing noise.
-let key = match self.session.audio_key().request(track_id, file_id).await {
-    Ok(key) => Some(key),
-    Err(e) => {
-        warn!("Unable to load key, continuing without decryption: {e}");
-        None
-    }
-};
-
-let mut decrypted_file = AudioDecrypt::new(key, encrypted_file);
-
-let is_ogg_vorbis = AudioFiles::is_ogg_vorbis(format);
-let (offset, mut normalisation_data) = if is_ogg_vorbis {
-    // Spotify stores normalisation data in a custom Ogg packet instead of Vorbis comments.
-    let normalisation_data =
-        NormalisationData::parse_from_ogg(&mut decrypted_file).ok();
-    (SPOTIFY_OGG_HEADER_END, normalisation_data)
-} else {
-    (0, None)
-};
-
-let audio_file = match Subfile::new(
-    decrypted_file,
-    offset,
-    stream_loader_controller.len() as u64,
-) {
-    Ok(audio_file) => audio_file,
-    Err(e) => {
-        error!("PlayerTrackLoader::load_track error opening subfile: {e}");
-        return None;
-    }
-};
+Input file should contain valid track ids like :
+* spotify:track:7F1lHcpnTycnimQrCxDFI5
+* https://open.spotify.com/track/7F1lHcpnTycnimQrCxDFI5
+* spotify:track:7F1lHcpnTycnimQrCxDFI5,"Hot","Hot","INNA",2010,217036,71,false,foobar,2025-02-27T18:39:32Z,"europop","Roton Music",0.816,0.94,7,-6.079,0,0.28,0.0798,0.444,0.431,0.596,128,4
