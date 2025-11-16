@@ -14,8 +14,9 @@ use librespot_oauth::OAuthClientBuilder;
 use regex::Regex;
 use std::env;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 
 const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:8898/login";
@@ -192,6 +193,7 @@ async fn download_track(session: &Session, track_uri: String, output_dir: &Path)
     
     if output_path.exists() {
         println!("File already exists, skipping download: {}", filename);
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         return Ok(());
     }
     
@@ -199,7 +201,9 @@ async fn download_track(session: &Session, track_uri: String, output_dir: &Path)
     let resolved = resolve_available_track(&session, track, &spotify_uri, &track_uri).await?;
     let (_track, audio_item, track_id, _current_spotify_uri) = match resolved {
         Some(data) => data,
-        None => return Ok(()), // Track unavailable, already logged
+        None => {
+            return Err(anyhow::anyhow!("Track unavailable: no audio files found"));
+        }
     };
     
 
@@ -253,7 +257,7 @@ async fn download_track(session: &Session, track_uri: String, output_dir: &Path)
     // Write the buffer into a ogg file in the output directory
     std::fs::write(&output_path, &buffer[0xa7..]).expect("Cannot write decrypted track");
     // println!("Saved to: {}", output_path.display());
-    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(8)).await;
     Ok(())
 }
 
@@ -284,6 +288,13 @@ async fn main() -> Result<()> {
     std::fs::create_dir_all(&output_dir)
         .with_context(|| format!("Failed to create output directory: {}", output_dir.display()))?;
     println!("Output directory: {}", output_dir.display());
+
+    // Create error file for failed downloads
+    let error_filename = format!("{}_error.txt", dir_name);
+    let error_file = File::create(&error_filename)
+        .with_context(|| format!("Failed to create error file: {}", error_filename))?;
+    let error_file = Arc::new(Mutex::new(error_file));
+    println!("Error file: {}", error_filename);
 
     // Create OAuth session
     let session = create_oauth_session(&client_id, &redirect_uri).await?;
@@ -346,6 +357,10 @@ async fn main() -> Result<()> {
         if let Err(e) = download_track(&session, track_uri.clone(), &output_dir).await {
             eprintln!("Error downloading {}: {:?}", track_uri, e);
             eprintln!("Continuing with next track...");
+            // Write to error file with error message
+            if let Ok(mut file) = error_file.lock() {
+                writeln!(file, "{},{}", track_uri, e).ok();
+            }
         }
         
     }
